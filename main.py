@@ -324,46 +324,156 @@ class Automaton:
             transition_relation=new_relation,
             accepting_states=new_accepting
         )
+    # Add this method to the Automaton class
     
-    # ==================== NEA-specific methods ====================
-    
-    def to_DEA(self) -> 'Automaton':
-        if self.type == 1:
-            return self  # Already a DEA
+    def to_regex(self) -> 'RegularExpression':
+        """
+        Convert automaton to regular expression using state elimination.
+        Only works for finite automata (types 1, 2, 3).
+        """
+        if self.type == 4:
+            # Convert to type 3 first
+            return self._eliminate_word_transitions().to_regex()
         
         if self.type == 3:
-            # First eliminate epsilon transitions
+            # Convert to type 2 first
+            return self._eliminate_epsilon().to_regex()
+        
+        if self.type == 2 or self.type == 1:
+            # Use state elimination algorithm
+            return self._state_elimination_to_regex()
+        
+        raise ValueError("Cannot convert this automaton type to regex")
+    
+    def _state_elimination_to_regex(self) -> 'RegularExpression':
+        # Create a copy with generalized transitions (edges can be regexes)
+        # transitions: dict[(state, state)] = regex_string
+        transitions = {}
+        
+        # Initialize with existing transitions
+        trans_dict = defaultdict(list)
+        for src, sym, tgt in self.transition_relation:
+            if sym is None:
+                trans_dict[(src, tgt)].append('ε')
+            else:
+                trans_dict[(src, tgt)].append(str(sym))
+        
+        # Combine parallel edges with |
+        for (src, tgt), symbols in trans_dict.items():
+            if len(symbols) == 1:
+                transitions[(src, tgt)] = symbols[0]
+            else:
+                transitions[(src, tgt)] = '(' + '+'.join(symbols) + ')'
+        
+        # Create new unique start and accept states
+        new_start = '_start'
+        new_accept = '_accept'
+        
+        # Add epsilon transitions from new start to old start
+        transitions[(new_start, self.start_state)] = 'ε'
+        
+        # Add epsilon transitions from old accepting states to new accept
+        for acc in self.accepting_states:
+            transitions[(acc, new_accept)] = 'ε'
+        
+        # States to eliminate (all except new start and accept)
+        states_to_eliminate = list(self.states)
+        
+        # Eliminate states one by one
+        for state in states_to_eliminate:
+            # Find all transitions going through this state
+            incoming = [(s, state) for (s, t) in transitions.keys() if t == state and s != state]
+            outgoing = [(state, t) for (s, t) in transitions.keys() if s == state and t != state]
+            self_loop = transitions.get((state, state), None)
+            
+            # For each pair of incoming and outgoing edges
+            for (src, _) in incoming:
+                for (_, tgt) in outgoing:
+                    # Build new regex: incoming · (self_loop)* · outgoing
+                    parts = []
+                    
+                    in_regex = transitions.get((src, state), '')
+                    out_regex = transitions.get((state, tgt), '')
+                    
+                    if in_regex:
+                        parts.append(in_regex if '+' not in in_regex or in_regex.startswith('(') else f'({in_regex})')
+                    
+                    if self_loop:
+                        loop = self_loop if '+' not in self_loop or self_loop.startswith('(') else f'({self_loop})'
+                        parts.append(f'({loop})*')
+                    
+                    if out_regex:
+                        parts.append(out_regex if '+' not in out_regex or out_regex.startswith('(') else f'({out_regex})')
+                    
+                    new_regex = ''.join(parts)
+                    
+                    # Add or combine with existing transition
+                    if (src, tgt) in transitions:
+                        existing = transitions[(src, tgt)]
+                        transitions[(src, tgt)] = f'({existing}+{new_regex})'
+                    else:
+                        transitions[(src, tgt)] = new_regex
+            
+            # Remove all transitions involving the eliminated state
+            keys_to_remove = [(s, t) for (s, t) in transitions.keys() if s == state or t == state]
+            for key in keys_to_remove:
+                del transitions[key]
+        
+        # The final regex is the transition from new_start to new_accept
+        final_regex = transitions.get((new_start, new_accept), '∅')
+        
+        # Simplify epsilon
+        final_regex = final_regex.replace('εε', 'ε').replace('ε', '')
+        if not final_regex:
+            final_regex = 'ε'
+        
+        return RegularExpression(final_regex)
+    
+    def to_DEA(self) -> 'Automaton':
+        """Convert NEA (types 2, 3, 4) to DEA using powerset construction."""
+        if self.type == 1:
+            return self  
+        
+        if self.type == 3:
             return self._eliminate_epsilon().to_DEA()
         
         if self.type == 4:
-            # First eliminate word transitions
             return self._eliminate_word_transitions().to_DEA()
         
-
-        new_states = powerset_noemptyset(self.states)
         new_start = frozenset({self.start_state})
         
-        # Build transition dictionary for easier lookup
         trans_dict = self._get_transition_dict()
         
-        # Build new transitions
         new_relation = set()
-        for S in new_states:
+        reachable_states = set()
+        queue = [new_start]
+        reachable_states.add(new_start)
+        
+        while queue:
+            S = queue.pop(0)
+            
             for a in self.alphabet:
                 target_set = set()
                 for q in S:
                     target_set.update(trans_dict.get((q, a), frozenset()))
+                
                 if target_set:
-                    new_relation.add((S, a, frozenset(target_set)))
-
+                    target_frozenset = frozenset(target_set)
+                    new_relation.add((S, a, target_frozenset))
+                    
+                    # Add to reachable states and queue if not seen before
+                    if target_frozenset not in reachable_states:
+                        reachable_states.add(target_frozenset)
+                        queue.append(target_frozenset)
+        
         accepting = frozenset({
-            S for S in new_states 
+            S for S in reachable_states 
             if len(S.intersection(self.accepting_states)) != 0
         })
-
+        
         return Automaton(
             type=1,
-            states=new_states,
+            states=frozenset(reachable_states),
             accepting_states=accepting,
             start_state=new_start,
             transition_relation=new_relation,
@@ -1246,18 +1356,23 @@ class Grammar:
         return new_grammar
 
 def main():
+    """Simple interactive terminal for automaton, grammar, and regex operations."""
     automata = {}
     grammars = {}
+    regexes = {}
     
-    print("Automaton & Grammar Terminal - Type 'help' for commands\n")
+    print("Automaton, Grammar & RegEx Terminal - Type 'help' for commands\n")
     
     while True:
         try:
             command = input("> ").strip()
             if not command:
                 continue
+                
             parts = command.split()
             cmd = parts[0].lower()
+            
+            # Exit
             if cmd in ['exit', 'quit']:
                 break
             
@@ -1266,67 +1381,158 @@ def main():
                 print("""
 Commands:
   LOADING:
-    load <file>              - Load automata/grammars from file
-    list                     - List all loaded items
+    load <file>                  - Load automata/grammars/regexes from file
+    list                         - List all loaded items
   
-  AUTOMATA:
-    show <name>              - Show automaton info
-    graph <name>             - Visualize automaton
-    test <name> <word>       - Test if word is accepted
-    minimize <name> [result] - Minimize automaton
-    to_dea <name> [res]      - To DEA
-    complement <name> [res]  - Complement automaton
-    union <n1> <n2> [res]    - Union of automata
-    intersect <n1> <n2> [res] - Intersection of automata
+  AUTOMATA OPERATIONS:
+    show <name>                  - Show automaton info
+    graph <name>                 - Visualize automaton
+    test <name> <word>           - Test if word is accepted
+    
+    TRANSFORMATIONS:
+      to_dea <name> [result]     - Convert NEA/NEA+ε/NEA+words to DEA
+      minimize <name> [result]   - Minimize DEA
+      complement <name> [res]    - Complement DEA
+      
+    COMBINATIONS:
+      union <n1> <n2> [res]      - Union of two DEAs
+      intersect <n1> <n2> [res]  - Intersection of two DEAs
+    
+    CONVERSIONS:
+      to_grammar <name> [result] - Convert automaton to grammar
+      to_regex <name> [result]   - Convert automaton to regex
   
-  GRAMMARS:
-    show_grammar <name>      - Show grammar info
-    to_cnf <name> [result]   - Convert to Chomsky Normal Form
-    to_nea <name> [result]   - Convert Type-3 grammar to NEA
-    remove_epsilon <name> [res] - Remove epsilon productions
-    remove_unit <name> [res] - Remove unit productions
+  GRAMMAR OPERATIONS:
+    show_grammar <name>          - Show grammar info
+    
+    TYPE-2 (CFG) TRANSFORMATIONS:
+      remove_non_term <name> [res]  - Remove non-terminating symbols
+      remove_unreach <name> [res]   - Remove unreachable symbols
+      remove_epsilon <name> [res]   - Remove epsilon productions
+      remove_unit <name> [res]      - Remove unit productions
+      to_cnf <name> [result]        - Convert to Chomsky Normal Form
+    
+    TYPE-3 (REGULAR) CONVERSIONS:
+      to_nea <name> [result]        - Convert Type-3 grammar to NEA
+  
+  REGEX OPERATIONS:
+    show_regex <name>            - Show regex pattern
+    regex_to_nea <name> [result] - Convert regex to NEA
   
   GENERAL:
-    delete <name>            - Delete item
-    clear                    - Clear all
-    exit                     - Exit
+    delete <name>                - Delete item
+    clear                        - Clear all
+    exit                         - Exit
 """)
             
-            # Load automata/grammars from file
+            # Load
             elif cmd == 'load':
                 if len(parts) < 2:
                     print("Usage: load <filename>")
                     continue
                 try:
-                    loaded_automata, loaded_grammars = load_from_file(parts[1])
+                    loaded_automata, loaded_grammars, loaded_regexes = load_from_file(parts[1])
                     automata.update(loaded_automata)
                     grammars.update(loaded_grammars)
+                    regexes.update(loaded_regexes)
                     
-                    if loaded_automata or loaded_grammars:
+                    if loaded_automata or loaded_grammars or loaded_regexes:
                         msg = []
                         if loaded_automata:
                             msg.append(f"{len(loaded_automata)} automata: {', '.join(loaded_automata.keys())}")
                         if loaded_grammars:
                             msg.append(f"{len(loaded_grammars)} grammars: {', '.join(loaded_grammars.keys())}")
+                        if loaded_regexes:
+                            msg.append(f"{len(loaded_regexes)} regexes: {', '.join(loaded_regexes.keys())}")
                         print(f"Loaded {' and '.join(msg)}")
                     else:
                         print("No items loaded")
                 except Exception as e:
                     print(f"Error: {e}")
             
-            # List all items
+            # List
             elif cmd == 'list':
-                if automata or grammars:
+                if automata or grammars or regexes:
                     if automata:
                         print("Automata:")
                         for name, aut in sorted(automata.items()):
-                            print(f"  {name}: {len(aut.states)} states")
+                            type_names = {1: "DEA", 2: "NEA", 3: "NEA+ε", 4: "NEA+words"}
+                            print(f"  {name}: {type_names.get(aut.type, 'Unknown')}, {len(aut.states)} states")
                     if grammars:
                         print("Grammars:")
                         for name, gram in sorted(grammars.items()):
-                            print(f"  {name}: {len(gram.N)} non-terminals, {len(gram.P)} productions")
+                            print(f"  {name}: {gram.type.name}, {len(gram.N)} non-terminals, {len(gram.P)} productions")
+                    if regexes:
+                        print("Regular Expressions:")
+                        for name, regex in sorted(regexes.items()):
+                            print(f"  {name}: {regex.pattern}")
                 else:
                     print("Nothing loaded")
+            
+            # Show regex
+            elif cmd == 'show_regex':
+                if len(parts) < 2:
+                    print("Usage: show_regex <name>")
+                elif parts[1] not in regexes:
+                    print(f"Regex not found: {parts[1]}")
+                else:
+                    print(f"\n{parts[1]}: {regexes[parts[1]].pattern}\n")
+            
+            # Convert regex to NEA
+            elif cmd == 'regex_to_nea':
+                if len(parts) < 2:
+                    print("Usage: regex_to_nea <name> [result]")
+                elif parts[1] not in regexes:
+                    print(f"Regex not found: {parts[1]}")
+                else:
+                    try:
+                        result_name = parts[2] if len(parts) > 2 else f"{parts[1]}_nea"
+                        automata[result_name] = regexes[parts[1]].to_NEA()
+                        print(f"Created automaton: {result_name}")
+                    except Exception as e:
+                        print(f"Error: {e}")
+            
+            # Convert automaton to regex
+            elif cmd == 'to_regex':
+                if len(parts) < 2:
+                    print("Usage: to_regex <name> [result]")
+                elif parts[1] not in automata:
+                    print(f"Automaton not found: {parts[1]}")
+                else:
+                    try:
+                        result_name = parts[2] if len(parts) > 2 else f"{parts[1]}_regex"
+                        regexes[result_name] = automata[parts[1]].to_regex()
+                        print(f"Created regex: {result_name}")
+                        print(f"Pattern: {regexes[result_name].pattern}")
+                    except Exception as e:
+                        print(f"Error: {e}")
+            
+            # Delete item
+            elif cmd == 'delete':
+                if len(parts) < 2:
+                    print("Usage: delete <name>")
+                else:
+                    deleted = False
+                    if parts[1] in automata:
+                        del automata[parts[1]]
+                        deleted = True
+                    if parts[1] in grammars:
+                        del grammars[parts[1]]
+                        deleted = True
+                    if parts[1] in regexes:
+                        del regexes[parts[1]]
+                        deleted = True
+                    if deleted:
+                        print(f"Deleted: {parts[1]}")
+                    else:
+                        print(f"Not found: {parts[1]}")
+            
+            # Clear all
+            elif cmd == 'clear':
+                automata.clear()
+                grammars.clear()
+                regexes.clear()
+                print("Cleared all")
             
             # Show automaton info
             elif cmd == 'show':
@@ -1418,7 +1624,7 @@ Commands:
                         print(f"Created: {result_name}")
                     except Exception as e:
                         print(f"Error: {e}")
-# Convert to DEA
+
             elif cmd == 'to_dea':
                 if len(parts) < 2:
                     print("Usage: to_dea <name> [result]")
@@ -1538,20 +1744,43 @@ Commands:
     
     print("Goodbye!")
 
+def detect_regex(content: str) -> bool:
+    lines = [line.strip() for line in content.strip().split('\n') if line.strip() and not line.strip().startswith('#')]
+    
+    # If it starts with regex: or pattern:, it's definitely a regex
+    if lines and (lines[0].lower().startswith('regex:') or lines[0].lower().startswith('pattern:')):
+        return True
+    
+    # If single line with regex operators and no automaton/grammar keywords
+    if len(lines) == 1:
+        line = lines[0]
+        automaton_keywords = ['type:', 'states:', 'alphabet:', 'start:', 'accept:', '->']
+        grammar_keywords = ['::=']
+        
+        has_keywords = any(kw in line for kw in automaton_keywords + grammar_keywords)
+        has_regex_ops = any(op in line for op in ['*', '+', '(', ')'])
+        
+        if has_regex_ops and not has_keywords:
+            return True
+    
+    return False
 
 def load_from_file(filename: str):
+    
     automata = {}
     grammars = {}
+    regexes = {}
     
     with open(filename, 'r', encoding='utf-8') as f:
         content = f.read()
     
-    # Check if file contains named items (lines ending with ':' at start of line)
+    # Check if file contains named items
     name_pattern = re.compile(r'^([A-Za-z]\w*):\s*$', re.MULTILINE)
     
     if name_pattern.search(content):
         # Format with names - split into sections
         sections = name_pattern.split(content)
+        
         for i in range(1, len(sections), 2):
             if i + 1 < len(sections):
                 name = sections[i].strip()
@@ -1560,10 +1789,18 @@ def load_from_file(filename: str):
                 if not definition:
                     continue
                 
-                # Determine if it's an automaton or grammar
-                is_automaton = detect_automaton(definition)
+                # Determine type
+                if detect_regex(definition):
+                    try:
+                        if pattern.lower().startswith('regex:'):
+                            pattern = pattern[6:].strip()
+                        elif pattern.lower().startswith('pattern:'):
+                            pattern = pattern[8:].strip()
+                        regexes[name] = RegularExpression(pattern)
+                    except Exception as e:
+                        print(f"Warning: Failed to load regex '{name}': {e}")
                 
-                if is_automaton:
+                elif detect_automaton(definition):
                     # Load as automaton
                     try:
                         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as tmp:
@@ -1585,12 +1822,21 @@ def load_from_file(filename: str):
                     except Exception as e:
                         print(f"Warning: Failed to load grammar '{name}': {e}")
     else:
-        # Single item without name - detect type and use filename as name
+        # Single item without name
         base_name = os.path.basename(filename).rsplit('.', 1)[0]
         
-        is_automaton = detect_automaton(content)
+        if detect_regex(content):
+            try:
+                pattern = content.strip()
+                if pattern.lower().startswith('regex:'):
+                    pattern = pattern[6:].strip()
+                elif pattern.lower().startswith('pattern:'):
+                    pattern = pattern[8:].strip()
+                regexes[base_name] = RegularExpression(pattern)
+            except Exception as e:
+                print(f"Warning: Failed to load regex: {e}")
         
-        if is_automaton:
+        elif detect_automaton(content):
             try:
                 loaded = Automaton.load_from_file(filename)
                 if loaded:
@@ -1604,8 +1850,7 @@ def load_from_file(filename: str):
             except Exception as e:
                 print(f"Warning: Failed to load grammar: {e}")
     
-    return automata, grammars
-
+    return automata, grammars, regexes
 
 def detect_automaton(content: str) -> bool:
     lines = content.strip().split('\n')
@@ -1656,6 +1901,235 @@ def detect_automaton(content: str) -> bool:
     
     # Decide based on which pattern is more common
     return automaton_pattern_count > grammar_pattern_count
+
+class RegularExpression:
+    """
+    Regular Expression class supporting conversion to/from NEA.
+    
+    Supports operations:
+    - Concatenation: ab
+    - Union: a+b
+    - Kleene star: a*
+    - Parentheses: (a+b)*
+    - Empty string: ε or epsilon
+    - Empty set: ∅
+    """
+    
+    def __init__(self, pattern: str = ""):
+        self.pattern = pattern
+        self.EPSILON = 'ε'
+        self.EMPTY_SET = '∅'
+    
+    def __str__(self):
+        return f"RegEx: {self.pattern}"
+    
+    def to_NEA(self) -> 'Automaton':
+        """
+        Convert regular expression to NEA using Thompson's construction.
+        """
+        return self._thompson_construction(self.pattern)
+    
+    def _thompson_construction(self, pattern: str) -> 'Automaton':
+        """
+        Thompson's construction algorithm for converting regex to NEA.
+        """
+        # Parse the pattern into a postfix notation first
+        postfix = self._to_postfix(pattern)
+        
+        # Stack to hold automata fragments
+        stack = []
+        state_counter = [0]  # Use list to allow modification in nested function
+        
+        def new_state():
+            state = f"q{state_counter[0]}"
+            state_counter[0] += 1
+            return state
+        
+        for token in postfix:
+            if token == '+':  # Union
+                nea2 = stack.pop()
+                nea1 = stack.pop()
+                
+                # Create new start and accept states
+                new_start = new_state()
+                new_accept = new_state()
+                
+                # Epsilon transitions from new start to both automata
+                transitions = set(nea1.transition_relation)
+                transitions.update(nea2.transition_relation)
+                transitions.add((new_start, None, nea1.start_state))
+                transitions.add((new_start, None, nea2.start_state))
+                
+                # Epsilon transitions from both accepting states to new accept
+                for acc in nea1.accepting_states:
+                    transitions.add((acc, None, new_accept))
+                for acc in nea2.accepting_states:
+                    transitions.add((acc, None, new_accept))
+                
+                states = nea1.states | nea2.states | {new_start, new_accept}
+                alphabet = nea1.alphabet | nea2.alphabet
+                
+                nea = Automaton(
+                    type=3,
+                    states=frozenset(states),
+                    alphabet=alphabet,
+                    start_state=new_start,
+                    accepting_states=frozenset({new_accept}),
+                    transition_relation=transitions
+                )
+                stack.append(nea)
+            
+            elif token == '·':  # Concatenation
+                nea2 = stack.pop()
+                nea1 = stack.pop()
+                
+                # Connect accepting states of nea1 to start of nea2
+                transitions = set(nea1.transition_relation)
+                transitions.update(nea2.transition_relation)
+                
+                for acc in nea1.accepting_states:
+                    transitions.add((acc, None, nea2.start_state))
+                
+                states = nea1.states | nea2.states
+                alphabet = nea1.alphabet | nea2.alphabet
+                
+                nea = Automaton(
+                    type=3,
+                    states=frozenset(states),
+                    alphabet=alphabet,
+                    start_state=nea1.start_state,
+                    accepting_states=nea2.accepting_states,
+                    transition_relation=transitions
+                )
+                stack.append(nea)
+            
+            elif token == '*':  # Kleene star
+                nea1 = stack.pop()
+                
+                new_start = new_state()
+                new_accept = new_state()
+                
+                transitions = set(nea1.transition_relation)
+                transitions.add((new_start, None, nea1.start_state))
+                transitions.add((new_start, None, new_accept))
+                
+                for acc in nea1.accepting_states:
+                    transitions.add((acc, None, nea1.start_state))
+                    transitions.add((acc, None, new_accept))
+                
+                states = nea1.states | {new_start, new_accept}
+                
+                nea = Automaton(
+                    type=3,
+                    states=frozenset(states),
+                    alphabet=nea1.alphabet,
+                    start_state=new_start,
+                    accepting_states=frozenset({new_accept}),
+                    transition_relation=transitions
+                )
+                stack.append(nea)
+            
+            elif token == self.EPSILON:  # Epsilon
+                start = new_state()
+                accept = new_state()
+                
+                nea = Automaton(
+                    type=3,
+                    states=frozenset({start, accept}),
+                    alphabet=set(),
+                    start_state=start,
+                    accepting_states=frozenset({accept}),
+                    transition_relation={(start, None, accept)}
+                )
+                stack.append(nea)
+            
+            elif token == self.EMPTY_SET:  # Empty set
+                start = new_state()
+                
+                nea = Automaton(
+                    type=3,
+                    states=frozenset({start}),
+                    alphabet=set(),
+                    start_state=start,
+                    accepting_states=frozenset(),
+                    transition_relation=set()
+                )
+                stack.append(nea)
+            
+            else:  # Single symbol
+                start = new_state()
+                accept = new_state()
+                
+                nea = Automaton(
+                    type=3,
+                    states=frozenset({start, accept}),
+                    alphabet={token},
+                    start_state=start,
+                    accepting_states=frozenset({accept}),
+                    transition_relation={(start, token, accept)}
+                )
+                stack.append(nea)
+        
+        return stack[0] if stack else Automaton(type=3)
+    
+    def _to_postfix(self, pattern: str) -> list:
+        # Add explicit concatenation operators
+        pattern = self._add_concat_operator(pattern)
+        
+        output = []
+        stack = []
+        
+        precedence = {'+': 1, '·': 2, '*': 3}
+        
+        for char in pattern:
+            if char == '(':
+                stack.append(char)
+            elif char == ')':
+                while stack and stack[-1] != '(':
+                    output.append(stack.pop())
+                if stack:
+                    stack.pop()  # Remove '('
+            elif char in precedence:
+                while (stack and stack[-1] != '(' and 
+                       stack[-1] in precedence and 
+                       precedence[stack[-1]] >= precedence[char]):
+                    output.append(stack.pop())
+                stack.append(char)
+            else:
+                output.append(char)
+        
+        while stack:
+            output.append(stack.pop())
+        
+        return output
+    
+    def _add_concat_operator(self, pattern: str) -> str:
+        result = []
+        
+        for i, char in enumerate(pattern):
+            result.append(char)
+            
+            if i < len(pattern) - 1:
+                next_char = pattern[i + 1]
+                
+                if ((char not in '(+' and next_char not in ')+*') or
+                    (char == '*' and next_char == '(') or
+                    (char == ')' and next_char == '(')):
+                    result.append('·')
+        
+        return ''.join(result)
+    
+    @classmethod
+    def from_string(cls, pattern: str):
+        """Create a RegularExpression from a string pattern."""
+        return cls(pattern)
+    
+    @classmethod
+    def from_file(cls, filename: str):
+        """Load a regular expression from a file."""
+        with open(filename, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+        return cls(content)
 
 
 import subprocess

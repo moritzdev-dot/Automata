@@ -3,10 +3,9 @@ type: NFA
 states: 1 2
 alphabet: a b
 start: 1
-accept: 1
-
+accept: 2
 
 1 -> a -> 1
-1 -> a -> 2
-1 -> b -> 2 
-2 -> b -> 1 
+1 -> b -> 2
+2 -> a -> 2
+2 -> b -> 1
