@@ -1,42 +1,12 @@
 A1:
-type: DFA
-states: q0 q1 
+type: NFA
+states: 1 2
 alphabet: a b
-start: q0
-accept: q1
+start: 1
+accept: 1
 
 
-q0 -> a -> q1
-q0 -> b -> q0
-q1 -> a -> q1
-q1 -> b -> q0
-
-
-
-
-
-
-
-
-
-
-
-
-A2:
-type: DFA
-states: q0 q1 q2
-alphabet: a b
-start: q0
-accept: q2
-
-q0 -> a -> q0
-q0 -> b -> q1
-q1 -> b -> q1
-q1 -> a -> q2
-q2 -> a -> q0
-q2 -> b -> q2
-
-
-G1:
-S -> aS | aa | aaaaB
-B -> ac
+1 -> a -> 1
+1 -> a -> 2
+1 -> b -> 2 
+2 -> b -> 1 

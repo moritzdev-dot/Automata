@@ -1256,11 +1256,8 @@ def main():
             command = input("> ").strip()
             if not command:
                 continue
-                
             parts = command.split()
             cmd = parts[0].lower()
-            
-            # Exit
             if cmd in ['exit', 'quit']:
                 break
             
@@ -1277,6 +1274,7 @@ Commands:
     graph <name>             - Visualize automaton
     test <name> <word>       - Test if word is accepted
     minimize <name> [result] - Minimize automaton
+    to_dea <name> [res]      - To DEA
     complement <name> [res]  - Complement automaton
     union <n1> <n2> [res]    - Union of automata
     intersect <n1> <n2> [res] - Intersection of automata
@@ -1420,6 +1418,19 @@ Commands:
                         print(f"Created: {result_name}")
                     except Exception as e:
                         print(f"Error: {e}")
+# Convert to DEA
+            elif cmd == 'to_dea':
+                if len(parts) < 2:
+                    print("Usage: to_dea <name> [result]")
+                elif parts[1] not in automata:
+                    print(f"Automaton not found: {parts[1]}")
+                else:
+                    try:
+                        result_name = parts[2] if len(parts) > 2 else f"{parts[1]}_dea"
+                        automata[result_name] = automata[parts[1]].to_DEA()
+                        print(f"Created: {result_name}")
+                    except Exception as e:
+                        print(f"Error: {e}")
             
             # Intersection of automata
             elif cmd == 'intersect':
@@ -1462,6 +1473,7 @@ Commands:
                         print(f"Created automaton: {result_name}")
                     except Exception as e:
                         print(f"Error: {e}")
+
             
             # Remove epsilon productions
             elif cmd == 'remove_epsilon':
@@ -1596,21 +1608,6 @@ def load_from_file(filename: str):
 
 
 def detect_automaton(content: str) -> bool:
-    """
-    Detect if content is an automaton definition or a grammar.
-    
-    Automaton indicators:
-    - Contains 'type:', 'states:', 'alphabet:', 'start:', 'accept:'
-    - Contains '->' with state transitions (like 'q0 -> a -> q1')
-    
-    Grammar indicators:
-    - Contains '->' with non-terminal productions (like 'S -> aSb')
-    - Contains '::=' (BNF format)
-    - Single uppercase letters on left side of productions
-    
-    Returns:
-        bool: True if automaton, False if grammar
-    """
     lines = content.strip().split('\n')
     
     # Check for automaton keywords
@@ -1661,8 +1658,11 @@ def detect_automaton(content: str) -> bool:
     return automaton_pattern_count > grammar_pattern_count
 
 
+import subprocess
 if __name__ == "__main__":
     main()
+    subprocess.run("rm *.png", shell=True, check=True)
+
 
 
 
