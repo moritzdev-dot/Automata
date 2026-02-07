@@ -5,10 +5,22 @@ alphabet: a b
 start: q0
 accept: q1
 
-q0 -> a -> q0
-q0 -> b -> q1
-q1 -> a -> q0
-q1 -> b -> q1
+
+q0 -> a -> q1
+q0 -> b -> q0
+q1 -> a -> q1
+q1 -> b -> q0
+
+
+
+
+
+
+
+
+
+
+
 
 A2:
 type: DFA

@@ -28,8 +28,6 @@ class Automaton:
     alphabet: Set[str] = field(default_factory=set)
     start_state: Any = None
     
-    # Transition relation: Set of (source_state, symbol, target_state) tuples
-    # Works for all automaton types
     transition_relation: Set[Tuple[Any, Any, Any]] = field(default_factory=set)
     
     accepting_states: frozenset = field(default_factory=frozenset)
@@ -37,14 +35,9 @@ class Automaton:
 
     @staticmethod
     def load_from_file(file_path: str) -> List['Automaton']:
-        """
-        Load one or more automata from a file.
-        Returns a list of Automaton objects.
-        """
         with open(file_path, 'r') as f:
             content = f.read()
         
-        # Split by delimiter (---) to support multiple automata
         automaton_blocks = content.split('---')
         
         automata = []
@@ -59,7 +52,6 @@ class Automaton:
     
     @staticmethod
     def _parse_block(block: str) -> 'Automaton':
-        """Parse a single automaton block."""
         states = set()
         alphabet = set()
         start_state = None
@@ -72,10 +64,8 @@ class Automaton:
         for line in lines:
             line = line.strip()
             
-            # Skip empty lines and comments
             if not line or line.startswith('#'):
                 continue
-            # Parse type
             elif line.startswith('type:'):
                 t = line[5:].strip()
                 if t.isdigit():
@@ -295,7 +285,6 @@ class Automaton:
 
 
     def minimize(self) -> 'Automaton':
-        """Minimize the automaton (only for DEA)."""
         if self.type != 1:
             raise ValueError("Minimization only defined for DEA (type 1)")
         
@@ -339,7 +328,6 @@ class Automaton:
     # ==================== NEA-specific methods ====================
     
     def to_DEA(self) -> 'Automaton':
-        """Convert NEA (types 2, 3, 4) to DEA using powerset construction."""
         if self.type == 1:
             return self  # Already a DEA
         
@@ -383,14 +371,11 @@ class Automaton:
         )
     
     def _eliminate_epsilon(self) -> 'Automaton':
-        """Eliminate epsilon transitions (convert type 3 to type 2)."""
         if self.type != 3:
             return self
         
-        # Build transition lookup
         trans_dict = self._get_transition_dict()
         
-        # Compute epsilon closure for each state
         def epsilon_closure(state):
             closure = {state}
             stack = [state]
@@ -402,7 +387,6 @@ class Automaton:
                         stack.append(next_state)
             return frozenset(closure)
         
-        # Build new transition relation without epsilon
         new_relation = set()
         for state in self.states:
             eps_closure = epsilon_closure(state)
@@ -416,7 +400,6 @@ class Automaton:
                 for target in targets:
                     new_relation.add((state, symbol, target))
         
-        # Update accepting states to include states with epsilon-path to accepting
         new_accepting = set(self.accepting_states)
         for state in self.states:
             if epsilon_closure(state).intersection(self.accepting_states):
@@ -436,7 +419,6 @@ class Automaton:
         if self.type != 4:
             return self
         
-        # Create new intermediate states for word transitions
         new_states = set(self.states)
         new_relation = set()
         state_counter = 0
@@ -446,8 +428,7 @@ class Automaton:
                 new_relation.add((src, None, tgt))
             elif len(word) == 1:  # Single symbol
                 new_relation.add((src, word, tgt))
-            else:  # Multi-symbol word
-                # Create intermediate states
+            else:
                 prev_state = src
                 for i, symbol in enumerate(word[:-1]):
                     intermediate = f"_q{state_counter}"
@@ -455,11 +436,10 @@ class Automaton:
                     new_states.add(intermediate)
                     new_relation.add((prev_state, symbol, intermediate))
                     prev_state = intermediate
-                # Last transition
                 new_relation.add((prev_state, word[-1], tgt))
         
         return Automaton(
-            type=3,  # Result has epsilon transitions
+            type=3,
             states=frozenset(new_states),
             alphabet=self.alphabet,
             start_state=self.start_state,
@@ -574,7 +554,6 @@ class Automaton:
         return dot
 
 class GrammarType(Enum):
-    """Chomsky hierarchy of formal grammars"""
     TYPE_0 = 0  # Unrestricted grammar
     TYPE_1 = 1  # Context-sensitive grammar
     TYPE_2 = 2  # Context-free grammar (CFG)
@@ -582,23 +561,6 @@ class GrammarType(Enum):
 
 
 class Grammar:
-    """
-    General Grammar class supporting Chomsky hierarchy (Type-0 through Type-3)
-    
-    A grammar is defined by:
-    - N: Set of non-terminal symbols
-    - Sigma: Set of terminal symbols (alphabet)
-    - P: Set of production rules
-    - S: Start symbol (S ∈ N)
-    - type: Grammar type (Type-0, Type-1, Type-2, or Type-3)
-    
-    Production rules format:
-    - Internal: (lhs: str, rhs: List[str]) where each element is a symbol
-    - External: Can accept strings which are converted to symbol lists
-    
-    For single-character symbols: "aSb" -> ['a', 'S', 'b']
-    For multi-character symbols: Use list directly: ['X1', 'N2']
-    """
     
     def __init__(self, grammar_type: GrammarType = GrammarType.TYPE_2):
         self.type: GrammarType = grammar_type
@@ -619,10 +581,6 @@ class Grammar:
         self.Sigma.add(symbol)
 
     def detect_grammar_type(self) -> GrammarType:
-        """
-        Detect the grammar type using generalized Type-3 definition:
-        A → uB or A → u, where u is any string of terminals.
-        """
         is_type3 = True
         is_type2 = True
         is_type1 = True
@@ -670,17 +628,6 @@ class Grammar:
             return GrammarType.TYPE_0
 
     def add_production(self, lhs: str, rhs: Union[str, List[str]]):
-        """
-        Add a production rule α -> β
-        Validates production based on grammar type
-        
-        Args:
-            lhs: Left-hand side (single non-terminal for Type-2/3)
-            rhs: Right-hand side as string (for single-char symbols) or list of symbols
-                 String "aSb" -> ['a', 'S', 'b']
-                 List ['X1', 'N2'] -> ['X1', 'N2']
-        """
-        # Convert rhs to list if it's a string
         if isinstance(rhs, str):
             if rhs == self.EPSILON:
                 rhs_list = [self.EPSILON]
@@ -737,7 +684,6 @@ class Grammar:
             self.N.add(symbol)
     
     def __str__(self):
-        """String representation of the grammar"""
         result = f"Grammar Type: {self.type.name}\n"
         result += f"  Non-terminals: {{{', '.join(sorted(self.N))}}}\n"
         result += f"  Terminals: {{{', '.join(sorted(self.Sigma))}}}\n"
@@ -759,7 +705,6 @@ class Grammar:
         return result
     
     def copy(self):
-        """Create a deep copy of the grammar"""
         new_grammar = Grammar(self.type)
         new_grammar.N = deepcopy(self.N)
         new_grammar.Sigma = deepcopy(self.Sigma)
@@ -769,10 +714,6 @@ class Grammar:
         return new_grammar
     
     def convert_type(self, target_type: GrammarType):
-        """
-        Convert grammar to a different type (if possible)
-        Note: Not all conversions are possible or preserve the language
-        """
         if self.type == target_type:
             return self.copy()
         
@@ -784,38 +725,6 @@ class Grammar:
     
     @classmethod
     def from_file(cls, filename: str, grammar_type: GrammarType = GrammarType.TYPE_2):
-        """
-        Parse a grammar from a file.
-        
-        Simplified format - just list productions:
-        ```
-        S -> aSb
-        S -> ε
-        A -> aA | b
-        ```
-        
-        Auto-detection rules:
-        - Start symbol: 'S' if it exists, otherwise the first non-terminal
-        - Non-terminals: All single uppercase letters (A-Z)
-        - Terminals: Everything else (lowercase, digits, symbols)
-        - Epsilon: ε, epsilon, λ, or empty string
-        
-        Optional configuration (if needed):
-        ```
-        TYPE: 2
-        START: E
-        
-        E -> E+T | T
-        T -> T*F | F
-        ```
-        
-        Args:
-            filename: Path to the grammar file
-            grammar_type: Default grammar type if not specified in file
-        
-        Returns:
-            Grammar object parsed from the file
-        """
         with open(filename, 'r', encoding='utf-8') as f:
             content = f.read()
         
@@ -823,41 +732,10 @@ class Grammar:
     
     @classmethod
     def from_string(cls, content: str, grammar_type: GrammarType = GrammarType.TYPE_2):
-        """
-        Parse a grammar from a string.
-        
-        Auto-detects everything from productions:
-        - Non-terminals: Single uppercase letters (A-Z)
-        - Terminals: Everything else
-        - Start symbol: 'S' if present, otherwise first non-terminal found
-        
-        Args:
-            content: Grammar specification as a string
-            grammar_type: Default grammar type if not specified in content
-        
-        Returns:
-            Grammar object parsed from the string
-        """
-        lines = content.strip().split('\n')
-        
-        # Check if it's BNF format
-        is_bnf_format = any('::=' in line for line in lines)
-        
-        if is_bnf_format:
-            return cls._parse_bnf_format(content, grammar_type)
-        else:
-            return cls._parse_simplified_format(content, grammar_type)
+        return cls._parse_simplified_format(content, grammar_type)
     
     @classmethod
     def _parse_simplified_format(cls, content: str, default_type: GrammarType):
-        """
-        Parse simplified format - auto-detect everything from productions.
-        
-        Rules:
-        - Single uppercase letters (A-Z) are non-terminals
-        - Everything else is a terminal
-        - Start symbol is 'S' if it exists, otherwise first non-terminal
-        """
         lines = content.strip().split('\n')
         
         grammar_type = default_type
@@ -1019,103 +897,14 @@ class Grammar:
     
     @classmethod
     def _parse_simple_format(cls, content: str, default_type: GrammarType):
-        """
-        Legacy parser for old explicit format.
-        Kept for backward compatibility.
-        """
         return cls._parse_simplified_format(content, default_type)
     
-    @classmethod
-    def _parse_bnf_format(cls, content: str, default_type: GrammarType):
-        """
-        Parse BNF-like format grammar specification.
-        
-        Example:
-        <S> ::= a<S>b | ε
-        <A> ::= a<A> | b
-        """
-        lines = content.strip().split('\n')
-        
-        g = cls(default_type)
-        start_symbol = None
-        
-        for line in lines:
-            # Remove comments
-            if '#' in line:
-                line = line[:line.index('#')]
-            line = line.strip()
-            
-            if not line:
-                continue
-            
-            # Parse BNF production
-            if '::=' in line:
-                parts = line.split('::=')
-                lhs = parts[0].strip()
-                rhs_alternatives = parts[1].strip()
-                
-                # Extract non-terminal from <...>
-                if lhs.startswith('<') and lhs.endswith('>'):
-                    lhs = lhs[1:-1]
-                
-                # Set first non-terminal as start symbol
-                if start_symbol is None:
-                    start_symbol = lhs
-                    g.set_start_symbol(start_symbol)
-                
-                g.add_non_terminal(lhs)
-                
-                # Parse alternatives
-                for rhs in rhs_alternatives.split('|'):
-                    rhs = rhs.strip()
-                    
-                    # Convert <...> to plain non-terminals and extract terminals
-                    converted_rhs = ""
-                    i = 0
-                    while i < len(rhs):
-                        if rhs[i] == '<':
-                            # Find matching >
-                            end = rhs.index('>', i)
-                            nt = rhs[i+1:end]
-                            g.add_non_terminal(nt)
-                            converted_rhs += nt
-                            i = end + 1
-                        elif rhs[i] in ['ε', 'λ']:
-                            converted_rhs += g.EPSILON
-                            i += 1
-                        elif rhs[i].isspace():
-                            i += 1
-                        else:
-                            # Terminal symbol
-                            g.add_terminal(rhs[i])
-                            converted_rhs += rhs[i]
-                            i += 1
-                    
-                    # Handle epsilon
-                    if converted_rhs in ['ε', 'epsilon', 'λ', '']:
-                        converted_rhs = g.EPSILON
-                    
-                    try:
-                        g.add_production(lhs, converted_rhs)
-                    except ValueError as e:
-                        print(f"Warning: Skipping invalid production '{lhs} -> {converted_rhs}': {e}")
-        
-        return g
     
     # =========================================================================
     # Type-2 (Context-Free Grammar) specific methods
     # =========================================================================
     
     def remove_non_terminating(self):
-        """
-        Remove all non-terminating non-terminal symbols.
-        Only applicable to Type-2 grammars.
-        
-        A non-terminal A is terminating if there exists a derivation A =>* w
-        where w ∈ Sigma* (i.e., A can derive a string of only terminals).
-        
-        Returns a new grammar without non-terminating symbols.
-        """
         if self.type != GrammarType.TYPE_2:
             raise ValueError("remove_non_terminating only works for Type-2 grammars")
         
@@ -1174,15 +963,6 @@ class Grammar:
         return new_grammar
     
     def remove_unreachable(self):
-        """
-        Remove all unreachable non-terminal symbols.
-        Only applicable to Type-2 grammars.
-        
-        A non-terminal A is reachable if there exists a derivation S =>* αAβ
-        where α, β ∈ (N ∪ Sigma)*.
-        
-        Returns a new grammar without unreachable symbols.
-        """
         if self.type != GrammarType.TYPE_2:
             raise ValueError("remove_unreachable only works for Type-2 grammars")
         
@@ -1228,18 +1008,6 @@ class Grammar:
         return new_grammar
     
     def remove_epsilon_productions(self):
-        """
-        Remove all ε-productions (A -> ε).
-        Only applicable to Type-2 grammars.
-        
-        Algorithm:
-        1. Find all nullable non-terminals (can derive ε)
-        2. For each production, create new productions by removing nullable symbols
-        3. If start symbol is nullable, create new start symbol S0 with S0 -> S | ε
-        4. Remove all ε-productions except from the new start symbol
-        
-        Returns a new grammar without ε-productions.
-        """
         if self.type != GrammarType.TYPE_2:
             raise ValueError("remove_epsilon_productions only works for Type-2 grammars")
         
@@ -1326,17 +1094,6 @@ class Grammar:
         return new_grammar
     
     def remove_unit_productions(self):
-        """
-        Remove all unit productions (A -> B where B is a non-terminal).
-        Only applicable to Type-2 grammars.
-        
-        Algorithm:
-        1. Find all unit pairs (A, B) where A =>* B via unit productions
-        2. For each unit pair (A, B), add A -> α for all B -> α where α is not a single non-terminal
-        3. Remove all unit productions
-        
-        Returns a new grammar without unit productions.
-        """
         if self.type != GrammarType.TYPE_2:
             raise ValueError("remove_unit_productions only works for Type-2 grammars")
         
@@ -1488,11 +1245,7 @@ class Grammar:
         
         return new_grammar
 
-#dea = Automaton.load_from_file("./dea.txt").pop()
-#dea.to_graphviz()
-
 def main():
-    """Simple interactive terminal for automaton and grammar operations."""
     automata = {}
     grammars = {}
     
