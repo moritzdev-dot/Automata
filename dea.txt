@@ -1,0 +1,30 @@
+A1:
+type: DFA
+states: q0 q1 
+alphabet: a b
+start: q0
+accept: q1
+
+q0 -> a -> q0
+q0 -> b -> q1
+q1 -> a -> q0
+q1 -> b -> q1
+
+A2:
+type: DFA
+states: q0 q1 q2
+alphabet: a b
+start: q0
+accept: q2
+
+q0 -> a -> q0
+q0 -> b -> q1
+q1 -> b -> q1
+q1 -> a -> q2
+q2 -> a -> q0
+q2 -> b -> q2
+
+
+G1:
+S -> aS | aa | aaaaB
+B -> ac
